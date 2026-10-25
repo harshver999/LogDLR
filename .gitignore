@@ -1,0 +1,45 @@
+# Environments
+loglm_env/
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Datasets and archives (downloaded separately on server)
+LogDLR/dataset/
+*.zip
+*.tar.gz
+
+# Model checkpoints and large binaries
+saved_model/
+*.ckpt
+*.pth
+*.bin
+*.safetensors
+
+# Logs
+wandb/
+lightning_logs/
+*.log
+
+# Additional checkpoints
+checkpoints/
+*.ckpt
+
+# Downloaded datasets and large data files
+LogDLR/dataset/
+LogLM/data/*.json
+*.dylib
+
+# LogLM datasets and test data
+LogLM/Instruction Dataset of LogLM.json
+LogLM/test set/

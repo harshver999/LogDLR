@@ -1,0 +1,17 @@
+{
+  "file": "/Users/anurag/BTP/LogLDR+++/LogDLR/dataset/Thunderbird/Thunderbird.log",
+  "nrows_read": 9981176,
+  "normal_lines": 9976242,
+  "anomaly_lines": 4934,
+  "first_field_distribution": {
+    "-": 9976242,
+    "PBS_CON": 2542,
+    "VAPI": 1458,
+    "MPT": 760,
+    "EXT_FS": 125,
+    "CPU": 43,
+    "ECC": 5,
+    "PBS_BFD": 1
+  },
+  "note": "This uses the exact label convention of LogDLR/utils/data.py: anomaly iff first field != \"-\"."
+}

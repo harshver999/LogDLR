@@ -1,0 +1,26 @@
+{
+  "Thunderbird": {
+    "total_log_lines_read": 9981176,
+    "normal_log_lines": 9976242,
+    "anomaly_log_lines": 4934,
+    "approx_normal_windows": 2494057,
+    "approx_anomaly_windows": 1233,
+    "log_file": "/Users/anurag/BTP/LogLDR+++/LogDLR/dataset/Thunderbird/Thunderbird.log"
+  },
+  "Spirit": {
+    "total_log_lines_read": 7958733,
+    "normal_log_lines": 7190591,
+    "anomaly_log_lines": 768142,
+    "approx_normal_windows": 1797644,
+    "approx_anomaly_windows": 192035,
+    "log_file": "/Users/anurag/BTP/LogLDR+++/LogDLR/dataset/Spirit/Spirit.log"
+  },
+  "BGL": {
+    "total_log_lines_read": 4713493,
+    "normal_log_lines": 4365033,
+    "anomaly_log_lines": 348460,
+    "approx_normal_windows": 1091254,
+    "approx_anomaly_windows": 87115,
+    "log_file": "/Users/anurag/BTP/LogLDR+++/LogDLR/dataset/BGL/BGL.log"
+  }
+}

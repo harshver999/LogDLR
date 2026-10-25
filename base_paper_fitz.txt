@@ -1,0 +1,1496 @@
+4456
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+LogDLR: Unsupervised Cross-System Log Anomaly
+Detection Through Domain-Invariant Latent
+Representation
+Junwei Zhou
+, Member, IEEE, Shaowen Ying
+, Shulan Wang
+, Dongdong Zhao
+,
+Jianwen Xiang
+, Member, IEEE, Kaitai Liang
+, Member, IEEE, and Peng Liu
+, Member, IEEE
+Abstract—Log anomaly detection aims to discover abnormal
+events from massive log data to ensure the security and reliability of
+software systems. However, due to the heterogeneity of log formats
+and syntaxes across different systems, existing log anomaly detec-
+tion methods often need to be designed and trained for speciﬁc sys-
+tems, lacking generalization ability. To address this challenge, we
+propose LogDLR, a novel unsupervised cross-system log anomaly
+detection method. The core idea of LogDLR is to use universal
+sentence embeddings and a Transformer-based autoencoder to
+extract domain-invariant latent representations from log entries,
+which can effectively adapt to log format changes and capture
+semantic information and dependencies in log sequences. To ob-
+tain domain-invariant latent representations, we adopt a domain-
+adversarial training strategy, introducing a domain discriminator
+that competes with the Transformer-based encoder through a gra-
+dient reversal layer, forcing the encoder to learn shared knowledge
+between different system logs. Finally, the Transformer-based de-
+coder detects anomalies based on the domain-invariant represen-
+tations obtained by the encoder. We evaluate LogDLR in simulated
+cross-system scenarios using three publicly available log datasets.
+The experimental results show that LogDLR can handle heteroge-
+neous logs effectively in cross-system scenarios and achieve efﬁcient
+and accurate anomaly detection on both source and target systems.
+Index Terms—Anomaly detection, log analysis, adversarial
+training.
+I. INTRODUCTION
+M
+ODERN software systems are prone to various anoma-
+lies due to their increasing scale and complexity, which
+poses a serious threat to their stability and sustainability. There-
+fore, timely detection and diagnosis of anomalies is essential for
+Received 18 February 2024; revised 20 February 2025; accepted 20 February
+2025. Date of publication 5 March 2025; date of current version 11 July 2025.
+This work was supported in part by the National Key Research and Development
+Program under Grant 2022YFB3104001, in part by the Key Research and
+Development Program of Hubei Province under Grant 2022BAA050, and in
+part by the NSF under Grant CNS2019340. (Corresponding author: Jianwen
+Xiang.)
+Junwei Zhou, Shaowen Ying, Dongdong Zhao, and Jianwen Xiang are
+with the School of Computer and Artiﬁcial Intelligence, Wuhan University of
+Technology, Wuhan 430070, China (e-mail: junweizhou@msn.com; jwxiang@
+whut.edu.cn).
+Shulan Wang is with the College of Big Data and Internet, Shenzhen Tech-
+nology University, Shenzhen 518118, China.
+Kaitai Liang is with the Faculty of Electrical Engineering, Mathematics and
+Computer Science, Delft University of Technology, Delft 2600, The Nether-
+lands.
+Peng Liu is with the College of Information Sciences and Technology,
+Pennsylvania State University, University Park, PA 16801 USA.
+Digital Object Identiﬁer 10.1109/TDSC.2025.3548050
+Fig. 1.
+An example of semantic similarity of log entries.
+ensuring the quality of software services. System logs, which
+record various events during software operation, are a valuable
+resource for effective anomaly detection, as they provide crucial
+insights into the system behavior [1]. However, contemporary
+software services often involve multiple types of software sys-
+tems, each generating speciﬁc logs with unique structures and
+formats [2]. This leads to the challenges of scale and hetero-
+geneity of logs for log-based anomaly detection.
+In recent years, deep learning-based log anomaly detection
+methods[3],[4],[5],[6],[7],[8]haveattractedwidespreadatten-
+tion due to their ability to automatically learn complex patterns
+and representations from large-scale log data. However, most
+existing methods are usually system-speciﬁc, meaning that they
+cannot be directly applied to a new system without substantial
+retraining or adaptation efforts [2]. To address this issue, some
+cross-system log anomaly detection methods based on transfer
+learning have been proposed [2], [9]. Cross-system log anomaly
+detection methods aim to detect anomalies in a new system
+(the target system or domain) by using the knowledge learned
+from another system (the source system or domain). This can
+reducethecostandeffortofdevelopingandmaintainingseparate
+detection models for different systems. However, cross-system
+log anomaly detection methods face two main challenges:
+1) Differences in log formats and syntaxes between systems
+can hinder the direct application of detection models
+across diverse software environments [2]. Cross-system
+log anomaly detection methods assume that logs from
+different systems have some semantic similarity, even
+though they may have different syntactic structures [2],
+[9]. As shown in Fig. 1, we can observe some semantic
+1545-5971 © 2025 IEEE. All rights reserved, including rights for text and data mining, and training of artiﬁcial intelligence and similar technologies.
+Personal use is permitted, but republication/redistribution requires IEEE permission. See https://www.ieee.org/publications/rights/index.html for more information.
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4457
+similarity between the logs generated on system 1 and
+system 2. For example, log entry “# sshd[4677]: Remote
+host disconnected: Key exchange failed” on system 1
+and log entry “# sshd[1122]: Remote host disconnected:
+Server host key changed” on system 2 are semantically
+both indicating a failed SSH connection attempt. There-
+fore, the detection model needs to be generalizable enough
+to handle heterogeneous logs across systems.
+2) The scarcity of sufﬁcient anomaly labels in real-world sce-
+narios. This challenge often arises from the inherent rarity
+of anomalous events in software systems, especially for
+newly deployed systems [9]. Supervised detection meth-
+ods [2], which rely on labeled data to learn the underlying
+patterns that distinguish normal and anomalous logs, are
+severely limited by this lack of labeled data. Unsupervised
+detection methods, which do not require any labeled data,
+can overcome this limitation, but they may suffer from low
+accuracy or robustness [10].
+To tackle the above two challenges, we propose LogDLR, an
+unsupervised cross-system log anomaly detection method that
+leverages domain-invariant latent representation. The key idea
+of LogDLR is to capture the essential features of log sequences
+that are invariant across different systems, regardless of their
+format and syntax differences. For example, in Fig. 1, both
+System 1 and System 2 have the similar indicative behavior, such
+as the remote host disconnection, the public key or password
+authentication, and the missing ﬁle or directory. These invariant
+features can be used to measure the semantic similarity of log se-
+quences and detect anomalies. Therefore, LogDLR aims to map
+log sequences into a latent space, where the domain-invariant
+latent representation can be extracted and used for anomaly
+detection.
+Speciﬁcally, LogDLR ﬁrst applies a system-independent pre-
+processing step to the raw log data, followed by using a shared
+pre-trained sentence embedding model to extract semantic vec-
+tors from the preprocessed log entries. Next, LogDLR uses an
+autoencoder based on Transformer [11], which consists of an
+encoder and a decoder, to learn latent representations from the
+semantic vectors of log entries. To ensure the domain-invariance
+of the latent representations, LogDLR employs a gradient re-
+versal layer [12] and an extra domain discriminator to engage
+in domain-adversarial training with the encoder. Finally, the
+decoder detects anomalies based on whether the latent repre-
+sentations can be correctly reconstructed.
+The main contributions of this work are as follows:
+1) We propose LogDLR, a novel unsupervised cross-system
+log anomaly detection method that can handle the vari-
+ability and heterogeneity of log formats and syntaxes in
+cross-system scenarios.
+2) We combine a Transformer-based autoencoder with
+domain-adversarial training to extract domain-invariant
+latent representations of log sequences, which capture the
+essential features of the system behavior while eliminating
+the format and syntax differences.
+3) We evaluate LogDLR on three public log datasets from
+different systems, and the simulation results indicate that
+LogDLR can achieve high F1-scores on both source and
+target systems. We also open-source the implementation
+of LogDLR on Github1 for reproducibility and further
+research.
+II. BACKGROUND AND MOTIVATION
+A. Unsupervised Cross-System Anomaly Detection
+Cross-system anomaly detection seeks to substantially reduce
+development and maintenance costs by identifying detection
+patterns in source systems and transferring them to target sys-
+tems. This approach eliminates the need to develop separate
+detection models for each system.
+The earliest cross-system method, LogTransfer [2], employs
+transfer learning to transfer abnormal patterns learned from
+a source system to a target system through a shared fully
+connected network. However, LogTransfer is supervised and
+requires anomaly-annotated data for both systems, which is
+often challenging to obtain in practical applications, especially
+innewlydeployedorunlabeledsystemenvironments.Toaddress
+this issue, LogTAD [9] introduces an unsupervised cross-system
+anomaly detection framework. This framework uses a Long
+Short-Term Memory (LSTM) [13] generator to cluster normal
+log data from different systems near the center of a hypersphere
+and applies domain-adversarial adaptation to align the distribu-
+tions of log data from different systems, detecting anomalies
+that deviate signiﬁcantly from the center.
+However, LogTAD [9] employs the LSTM model, which
+has inherent limitations in capturing long-distance dependencies
+and complex semantic features. For log data with diverse and
+long sequence feature distributions, LSTM can only focus on
+previous information at each time step due to its cyclic struc-
+ture, and therefore cannot capture the global information of the
+sequence [6]. Although LogTAD utilizes domain-adversarial
+adaptation to align the distributions of the source and target
+systems, its generator’s ability is constrained by the LSTM
+model, preventing it from fully capturing ﬁne-grained feature
+differences between systems.
+To address these issues, we utilize a Transformer-based au-
+toencoder to learn the latent representations of log sequences.
+Through the self-attention mechanism, the Transformer can
+simultaneously focus on all positions in a sequence, efﬁciently
+capturing long-distance dependencies and complex contextual
+associations within the log sequence [11]. It can extract tem-
+poral patterns and deeply explore the semantic features of the
+logs.ComparedtoLogTAD,theTransformer-basedautoencoder
+more comprehensively reﬂects the internal structure and behav-
+ioral characteristics of logs, enhancing adaptability to heteroge-
+neous log data across systems.
+B. Log Semantic Feature Extraction
+System logs are event records generated during software
+execution, stored in text form, and contain rich semantic infor-
+mation. However, logs from different systems may vary signif-
+icantly in format, structure, and syntax, complicating the direct
+1https://github.com/yingsw79/LogDLR
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4458
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+extraction and comparison of log semantics in cross-system
+scenarios [2].
+Traditional methods, such as LogTransfer [2] and Log-
+TAD [9], use word embedding techniques like GloVe [14] and
+Word2Vec [15] for semantic feature extraction. However, the
+embeddings generated by GloVe and Word2Vec are static and
+cannot dynamically adjust word meanings based on context,
+underperforming when processing semantically complex or am-
+biguous log entries [7]. To address this issue, several works, such
+asNeuralLog[6]andSwissLog[8],usepre-trainedBidirectional
+Encoder Representations from Transformers (BERT) [16] word
+embeddings to signiﬁcantly improve the quality of log semantic
+representations. BERT’s primary design goal is to generate
+contextual word embeddings, dynamically adjusting each input
+word’s vector to capture local contextual relationships [16].
+However, for sentence embeddings, BERT typically generates
+representationsbypoolingwordvectors(e.g.,averagepoolingor
+using [CLS] token vectors) [6]. This approach is not speciﬁcally
+optimized for sentence-level semantic relationships, especially
+in cross-system semantic comparisons of log entries [17].
+In LogDLR, we adopt the BERT-based Sentence-BERT
+(SBERT) [17] sentence embedding model for tasks requir-
+ing sentence-level semantic representation in cross-system log
+anomaly detection. SBERT is designed to generate high-quality
+sentence embeddings for computing semantic similarity be-
+tween sentences. It introduces a sentence-pair architecture based
+on BERT and is ﬁne-tuned through contrastive learning or
+sentence-pair tasks (such as natural language inference) to make
+the generated sentence embeddings more suitable for semantic
+comparison and measurement [17]. By leveraging SBERT’s
+pre-trained sentence embedding model, we treat log entries as
+natural language text and efﬁciently adapt to the diversity of log
+formats and syntax.
+C. Domain Shift
+In cross-domain tasks, differences in data distribution be-
+tween the source domain and the target domain (i.e., domain
+shift) often hinder models trained on the source domain from
+performing well on the target domain [18]. This issue is par-
+ticularly prominent when models trained on source system logs
+cannot generalize to other target systems due to changes in data
+distribution [9].
+To address the domain shift problem, domain adaptation
+methods enable models to share feature representations across
+different domains by reducing data distribution differences be-
+tween the source and target domains, thereby improving gen-
+eralization ability [19], [20], [21]. Domain-adversarial neural
+networks (DANN) [19] are fundamental domain adaptation
+methods that aim to learn domain-invariant features through
+adversarial training. The core idea is to introduce a domain
+discriminator and a gradient reversal layer (GRL) [12] to make
+the features generated by the model indistinguishable between
+the source and target domains through adversarial training.
+This mechanism encourages the model to focus on extracting
+task-relevant, domain-invariant features while ignoring domain-
+speciﬁc differences.
+In this work, we extend the principles of DANN [19] to
+autoencoder-based anomaly detection tasks to achieve univer-
+sal anomaly detection across system log data. Speciﬁcally,
+LogDLR integrates domain-adversarial training with the re-
+construction mechanism of autoencoders. Domain-adversarial
+training guides the encoder through a domain discriminator to
+generate domain-invariant latent representations, signiﬁcantly
+reducing distribution differences between the source and target
+systems. The autoencoder’s reconstruction loss ensures that
+the latent representation effectively captures the structural and
+semantic patterns of normal logs, thereby maintaining the ability
+to distinguish between normal and abnormal logs. This synergy
+enables LogDLR to overcome the differences in log distribution
+and achieve cross-system anomaly detection.
+III. THREAT MODEL AND ASSUMPTIONS
+This work focuses on detecting anomalies in cross-system
+log scenarios, where logs from different systems may differ
+in structure, format, and semantics. The proposed LogDLR
+method is designed for unsupervised anomaly detection and is
+not speciﬁc to any particular type of threat or attack. A log entry
+isconsideredananomalyifitspatterndeviatessigniﬁcantlyfrom
+the typical pattern learned during training on normal log se-
+quences. The anomaly detection process targets point anomalies,
+where individual log entries or sequences are evaluated based on
+their domain-invariant representation and reconstruction error.
+We assume that logs contain meaningful textual descriptions
+of system events. LogDLR leverages a pre-trained sentence em-
+bedding model to extract semantic features from logs. However,
+if the log contains unreadable or uninformative entries (such as
+hexadecimal memory addresses or raw binary data), the seman-
+tic extraction process may not capture their potential meaning.
+In such cases, LogDLR treats these entries as part of the normal
+training data, assuming that their patterns do not signiﬁcantly
+affect the model’s ability to detect anomalies. Additionally, we
+assume that logs from different systems exhibit a certain degree
+of semantic similarity despite differences in format and syntax.
+IV. DESIGN OF LOGDLR
+A. Overview
+We consider a source system s and a target system t, each of
+which generates a log sequence B = {bi}w
+i=1, where bi is the i-th
+log entry and w is the length of the log sequence. Given a mixed
+training dataset D = {Bi}n=ns+nt
+i=1
+, which contains ns normal
+log sequences Ds = {Bs
+i }ns
+i=1 from the source system and nt (<
+ns) normal log sequences Dt = {Bt
+i}nt
+i=1 from the target system,
+we expect LogDLR to extract domain-invariant representations
+and achieve uniﬁed anomaly detection regardless of log formats
+and syntaxes.
+Fig. 2 illustrates the framework of LogDLR. The framework
+takes log sequences from both the source and target systems
+as input. It preprocesses the log sequences with a system-
+independent method and then transforms them into semantic
+vectors using a universal sentence embedding. The Transformer-
+based autoencoder consists of a Transformer-based encoder and
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4459
+Fig. 2.
+The overall framework of LogDLR.
+Fig. 3.
+An example of log parsing (for illustration only, not used in LogDLR).
+a Transformer-based decoder. In the training stage, the encoder
+learns the latent representations of the normal log sequences
+from their semantic vectors. The domain discriminator, con-
+nected to the encoder through a gradient reversal layer, enables
+domain-adversarial training to obtain domain-invariant repre-
+sentations. The Transformer-based decoder reconstructs the se-
+mantic vectors of the log sequences from the representations. In
+the detection stage, the decoder detects anomalies based on the
+reconstruction errors of the log sequences exceeding a certain
+threshold.
+B. Preprocessing
+Existing log anomaly detection methods typically rely on log
+parsers (such as Drain [22], Spell [23], etc.) to parse the raw logs
+into event templates during the preprocessing step [2], [9]. Fig. 3
+shows an example of the log parsing. However, log parsing errors
+can compromise the integrity of log entries, leading to semantic
+loss or misunderstanding [6]. Moreover, the parsing process is
+system-speciﬁc, and usually requires writing suitable regular
+expressions for the log structure of a speciﬁc system, to ensure
+the quality of templates [24], [25], [26]. This processing step is
+time-consuming and laborious, and different systems generally
+have different templates due to the diversity of log formats and
+syntaxes [27]. Therefore, parsing is not suitable for cross-system
+anomaly detection scenarios.
+Instead of parsing the raw logs with complex methods, we use
+simple text preprocessing methods from the natural language
+processing (NLP) ﬁeld. We ﬁrst extract the content ﬁeld of log
+entries, then convert it to lowercase and remove non-alphabetic
+characters. Table I illustrates examples of preprocessing steps
+applied to three different datasets. Our processing step is simple
+and does not involve manual addition of system-speciﬁc regular
+expressions. It can be easily implemented with standard NLP
+toolkits. We denote the preprocessed log sequence as C =
+{ci}w
+i=1, where ci = preprocessing(bi) is the i-th preprocessed
+log entry.
+C. Sentence Embedding
+The sentence embedding model we use is based on Sentence-
+BERT (SBERT)2 [17], a variation of BERT [16] speciﬁcally
+designed for generating high-quality sentence embeddings. Un-
+like standard BERT, which primarily focuses on token-level
+representations, SBERT adopts a siamese network architecture.
+This architecture consists of two identical BERT models that
+share parameters and are trained on sentence pairs [17]. Each
+sentence is processed independently by one of the BERT models
+to produce an embedding, and the similarity between the two
+embeddings is then measured.
+The goal of SBERT is to generate sentence embeddings
+that reﬂect semantic similarity by ﬁne-tuning BERT on labeled
+sentence pairs. This ensures that embeddings of semantically
+similar sentences are closer in the vector space, while embed-
+dings of dissimilar sentences are farther apart [17]. This training
+2https://www.sbert.net
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4460
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+TABLE I
+EXAMPLES OF THE PREPROCESSING STEP ON THREE DIFFERENT DATASETS: THUNDERBIRD, SPIRIT, AND BGL
+strategy enables the model to effectively capture sentence-level
+semantics, making it particularly well-suited for tasks involving
+semantic similarity and comparison. By leveraging this capabil-
+ity, SBERT generates robust sentence embeddings that can be
+directly used to encode log entries, preserving their contextual
+and semantic information.
+In our framework, we utilize the SBERT model E to trans-
+form preprocessed log entries into de-dimensional embedding
+vectors. Formally, given a log sequence with w entries, the
+embedded log sequence is represented as X = {xi}w
+i=1, where
+xi = E(ci) denotes the embedding vector of the i-th log entry.
+D. Transformer-Based Autoencoder
+The
+Transformer-based
+autoencoder
+consists
+of
+a
+Transformer-based encoder and a Transformer-based decoder,
+as shown in Fig. 2. Given an embedded log sequence
+Xi ∈Rw×de in D, the encoder compresses it into a latent
+representation, and the decoder reconstructs the log sequence
+from this latent representation.
+The Transformer-based encoder is composed of l identical
+Transformer layers, each with two sub-layers. The ﬁrst sub-
+layer is multi-head self-attention, and the second sub-layer is
+a position-wise feed-forward network (FFN) [11]. The core
+component of the Transformer layer is the multi-head attention
+mechanism, which consists of h parallel self-attention heads that
+allow the model to weigh the importance of different parts of the
+input sequence. It is expressed as:
+Hi = MultiHeadAttn(Xi)
+= Concat(head1, . . . , headj, . . . , headh) θO,
+(1)
+where
+headj = Attention
+
+XiθQj, XiθKj, XiθVj
+
+,
+(2)
+Attention(Q, K, V ) = Softmax
+QKT
+√dk
+
+V ;
+(3)
+θQj, θKj, θVj ∈Rde×dk and θO ∈Rhdk×de are learnable pa-
+rameter matrices; dk is the dimension of a self-attention head.
+Additionally, each sub-layer in the Transformer layer applies
+residual connections and layer normalization [11]. Therefore,
+the output of the self-attention layer is deﬁned as:
+˜
+Hi = LayerNorm(Xi + Hi).
+(4)
+The FFN is applied after the self-attention sub-layer. It con-
+sists of two linear transformations with a ReLU activation func-
+tion in between:
+FFN( ˜
+Hi) = ReLU
+
+˜
+Hiθ1 + b1
+
+θ2 + b2,
+(5)
+where θ1 ∈Rde×dff , θ2 ∈Rdff ×de, b1 ∈Rdff , and b2 ∈Rde
+are learnable parameter matrices and biases; dff is the di-
+mension of FFN. After the FFN sub-layer, another residual
+connection and layer normalization are applied. Therefore, the
+output of the Transformer layer is deﬁned as the result of the
+second layer normalization:
+TransformerLayer(Xi) = LayerNorm
+
+˜
+Hi + FFN
+
+˜
+Hi
+
+.
+(6)
+Finally, we use a linear layer to reduce the output of the
+Transformer layer to a dz-dimensional vector Zi, which is the
+latent representation of the log sequence Xi:
+Zi = Encoder(Xi)
+= TransformerLayer(Xi)θ3 + b3,
+(7)
+where θ3 ∈Rwde×dz and b3 ∈Rdz are learnable parameters of
+the linear layer.
+The Transformer-based decoder has a network structure com-
+pletely symmetrical to the encoder. It decodes the latent repre-
+sentation Zi into a log sequence ˆ
+Xi ∈Rw×de. To make it easy,
+we denote the operation as:
+ˆ
+Xi = Decoder(Zi).
+(8)
+To ensure that the autoencoder can learn latent representations
+of normal log sequences while reconstructing them correctly. We
+use mean squared error as the measure of reconstruction error,
+that is:
+RE(Xi) = ∥Xi −ˆXi∥2
+2,
+(9)
+where ∥· ∥2 denotes the L2 norm and ˆXi is the reconstruction
+of Xi by the autoencoder model. The reconstruction error is also
+used as an anomaly score to detect abnormal log sequences, as
+we will explain in Section IV-G. The corresponding objective
+function is deﬁned as:
+LRE = 1
+n
+n
+
+i=1
+RE(Xi).
+(10)
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4461
+By minimizing (10), normal log sequences will have lower
+reconstruction errors because their latent representations are
+correctly learned by the encoder, while abnormal log sequences
+will have higher reconstruction errors.
+In addition, we apply L2 regularization to the latent represen-
+tation Z [28], as follows:
+LEM = 1
+n
+n
+
+i=1
+∥Zi∥2
+2,
+(11)
+where Zi is the latent representation of Xi. This regulariza-
+tion term encourages the latent representations to have smaller
+magnitudes, preventing them from becoming too large and po-
+tentially overﬁtting the data.
+Combining the two parts above, we deﬁne the objective
+function of the autoencoder part as:
+LAE = LRE + αLEM,
+(12)
+where α is a hyperparameter controlling the weight of LEM.
+E. Domain-Adversarial Training
+In this section, we describe the domain-adversarial training
+method that we use to learn domain-invariant representations
+(Z) of the system’s normal log sequence.
+We introduce an additional domain discriminator D and
+connect it to the Transformer-based encoder through a gradi-
+ent reversal layer (GRL) [12]. The discriminator models the
+probability that the encoder generates the latent representation
+from the source system or the target system. The discriminator
+consists of two linear layers with a LeakyReLu [29] function.
+Formally, we can calculate the probability distribution pi that
+the latent representation Zi comes from Ds or Dt by applying a
+softmax function to the output of the discriminator:
+pi = Softmax (LeakyReLU (GRL(Zi)θ4 + b4)θ5 + b5) ,
+(13)
+where θ4, θ5, b4, and b5 are learnable parameters of the discrim-
+inator.
+During forward propagation, the GRL acts as an identity func-
+tion, allowing the representations to ﬂow through unchanged.
+However, during backward propagation, the GRL modiﬁes the
+gradients that ﬂow back from the discriminator to the encoder.
+It multiplies the gradients by a negative constant λ, effectively
+changing their direction. Fig. 4 shows the role of GRL in for-
+ward and back propagation. Consequently, the encoder and the
+discriminator optimize in opposite directions: the encoder aims
+to generate representations that obscure their domain source,
+while the discriminator seeks to accurately identify the domain
+source.
+With the inclusion of the discriminator, the encoder now
+has two objectives. Firstly, it learns a latent representation of
+the system’s normal log sequence. Secondly, it ensures that
+the representations for different systems are domain-invariant
+and indistinguishable by the discriminator. The objective of
+the Transformer-based decoder remains the same, which is to
+reconstruct the log sequence from the domain-invariant rep-
+resentation provided by the encoder. This adversarial training
+Fig. 4.
+The role of GRL in forward and back propagation.
+process encourages the encoder to learn representations that are
+insensitive to the domain shift between the source and target
+systems. It effectively aligns the feature distributions of different
+domains, producing domain-invariant representations that can
+be shared and transferred across systems.
+The theoretical foundation of domain-invariant latent repre-
+sentations is supported by minimizing the H-divergence [12],
+[30] between pS(Z) and pT (Z), which represent the latent fea-
+ture distributions of the source and target domains, respectively.
+As noted by Ganin et al. [12], H-divergence dH(pS(Z), pT (Z))
+can be estimated as follows:
+dH (pS(Z), pT (Z))
+= 2 sup
+H
+		PZ∼pS(Z) [h(Z) = 1] −PZ∼pT (Z) [h(Z) = 1]
+		
+= 2 sup
+H
+
+PZ∼pS(Z)[h(Z) = 0] + PZ∼pT (Z) [h(Z) = 1] −1
+
+= 2 sup
+H
+[f(h) −1] ,
+(14)
+where H is the hypothesis class of functions h : Z →{0, 1}
+and f(h)=PZ∼pS(Z)[h(Z)= 0]+PZ∼pT (Z)[h(Z) = 1]. Thus,
+f(D) measures the discriminator’s effectiveness in identifying
+the domain source of the latent representations.
+We adopt cross-entropy loss as the objective function for
+domain prediction of latent representation, which is deﬁned as:
+LD = −1
+n
+n
+
+i=1
+[qi log(pi) + (1 −qi) log (1 −pi)] ,
+(15)
+where pi is calculated by (13) and qi is the domain label of the
+i-th log sequence Xi, indicating whether it comes from Ds or
+Dt (if Xi ∈Ds, then qi = 0, if Xi ∈Dt, then qi = 1). The dis-
+criminator is trained to minimize 15, thereby maximizing f(D)
+and enhancing the classiﬁcation accuracy of the latent represen-
+tation. GRL inverts these gradients for the encoder, compelling
+it to reduce f(D) by learning representations that confuse the
+discriminator, thus effectively reducing dH(pS(Z), pT (Z)).
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4462
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+At this point, we deﬁne the mathematical concept of domain-
+invariant latent representation as follows: A latent representation
+Z ∈Rdz is learned by the encoder (Encoder : Rw×de →Rdz),
+satisfying two properties:
+r Task Relevance: Z preserves the structural and semantic
+patterns of normal log sequences necessary for reconstruc-
+tion and anomaly detection by minimizing the reconstruc-
+tion error (LAE).
+r Domain Invariance: The distributions of Z for the source
+system Ds and target system Dt, denoted as pS(Z)
+and pT (Z), respectively, are aligned such that the H-
+divergence between them (dH(pS(Z), pT (Z))) is mini-
+mized.
+F. Overall Objective Function
+During the training phase, we aim to minimize the objective
+function LAE on the training set D, thereby optimizing the
+encoder parameters θe and decoder parameters θd. This ensures
+that the autoencoder can learn the latent representation and
+reconstruction of normal log sequences in both Ds and Dt.
+To obtain domain-invariant representations, we optimize the
+domain discriminator parameters θD by minimizing the cross-
+entropy loss (LD), which is equivalent to maximizing the neg-
+ative cross-entropy loss (−LD). Similarly, we optimize the
+encoder parameters θe by maximizing the same cross-entropy
+loss as the discriminator, which is equivalent to minimizing
+the negative cross-entropy loss. Therefore, the overall objective
+function can be deﬁned as follows:
+L = min
+θe,θd max
+θD [LAE (θe, θd) −βLD (θe, θD)] ,
+(16)
+where θe, θd and θD are the parameters of the encoder, the
+decoder and the domain discriminator, respectively. β is a hy-
+perparameter that controls the weight of LD.
+G. Anomaly Detection
+Once the Transformer-based autoencoder is trained, it can
+be used for anomaly detection. The basic assumption is that
+normal log sequences can be effectively compressed into low-
+dimensional latent representations and reconstructed with min-
+imal error. In contrast, anomalous log sequences, which deviate
+signiﬁcantly from the learned normal patterns, result in larger re-
+construction errors [31]. Therefore, we classify the log sequence
+Xi as anomalous if its reconstruction error exceeds a certain
+threshold δ; otherwise, we consider it normal. The formula is:
+Pred(Xi) =
+
+Normal,
+RE(Xi) ≤δ;
+Anomaly,
+RE(Xi) > δ.
+(17)
+where RE(Xi) is calculated by 9 and the threshold δ is obtained
+by Algorithm 1 on an additional validation set to ensure the
+optimal F1-score. When there are known abnormal samples in
+the validation set, the threshold can be selected by maximizing
+the F1-score.
+Algorithm 1: Threshold Selection for Anomaly Detection.
+Input: recon_losses: List of reconstruction losses for log
+entries, labels: Ground truth labels (0 for normal, 1 for
+anomaly), n: Number of threshold candidates to evaluate
+Output: δ: Optimal threshold
+1:
+Compute meanN ←Mean({loss | loss ∈
+recon_losses ∧label = 0})
+2:
+Compute meanA ←Mean({loss | loss ∈
+recon_losses ∧label = 1})
+3:
+Initialize step_size ←(meanA −meanN)/n
+4:
+Initialize max_f1 ←−1, δ ←meanN
+5:
+for i ←0 to n −1 do
+6:
+current_threshold ←meanN + i × step_size
+7:
+predictions ←{0 if loss ≤
+current_threshold else 1 | loss ∈recon_losses}
+8:
+Compute f1 ←F1-score(predictions, labels)
+9:
+if f1 > max_f1 then
+10:
+max_f1 ←f1
+11:
+δ ←current_threshold
+12:
+end if
+13:
+end for
+14:
+return δ
+TABLE II
+STATISTICS OF THE DATASETS
+V. EVALUATION
+A. Experimental Setup
+1) Datasets: We evaluate our approach on three public log
+datasets, Thunderbird, Spirit and BGL. Table II shows the statis-
+tics of the datasets.
+r Thunderbird: This dataset is collected from the Thun-
+derbird supercomputer system at Sandia National Labs
+(SNL) [32]. Thunderbird is a large dataset containing over
+200 million log entries and nearly 30 GB in size [10]. Con-
+sistent with prior work [6], [9], we use the ﬁrst 10,000,000
+log entries from the original Thunderbird dataset to form
+our dataset. Among these entries, 353,794 are labeled as
+anomalies.
+r Spirit: The Spirit dataset is also collected from a super-
+computer at SNL and contains more than 272 million log
+entries [33]. For Spirit, we use the 1 GB of logs from
+the Spirit dataset same as prior work [6], which contains
+7,983,345 log entries with 768,142 anomalies.
+r BGL: It comprises 4,747,963 logs collected from the Blue-
+Gene/L supercomputer system at Lawrence Livermore Na-
+tional Labs (LLNL) [32], of which 348,460 log entries are
+anomalous.
+For the above datasets, we use a sliding window of size 20 to
+slice the logs into log sequences (w = 20), following [9]. Then,
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4463
+TABLE III
+DATA PARTITIONING DETAILS WHEN DATASET SERVES AS THE SOURCE
+SYSTEM
+TABLE IV
+DATA PARTITIONING DETAILS WHEN DATASET SERVES AS THE TARGET SYSTEM
+we split the obtained log sequences into three non-overlapping
+parts: training set, validation set (used to determine the recon-
+struction error threshold δ), and test set.
+To emulate the real-world imbalance between source and
+target system log samples, we ensure a larger number of normal
+log sequences for training on the source system than on the target
+system. Speciﬁcally, when using the aforementioned datasets
+as source or target systems, we randomly select 100,000 or
+10,000 normal log sequences respectively for the training set.
+Table III and Table IV provide detailed partitioning information.
+When evaluating cross-system anomaly detection performance,
+we combine training samples from both the source and target
+systems to form the ﬁnal training set D, in alignment with the
+methodology described in the baseline method LogTAD [9].
+Additionally, we assess single-system anomaly detection per-
+formance using only source system training samples, as shown
+in Table III.
+2) Baselines: We compare LogDLR with the following un-
+supervised log anomaly detection methods:
+r PCA [34]: PCA constructs feature vectors from the parsed
+data, and then uses principal component analysis (PCA)
+to mine the feature vectors and label them as normal or
+abnormal.
+r LogCluster [35]: LogCluster ﬁrst converts log sequences
+into weighted vectors, then clusters them by similarity and
+selects a representative log sequence for each cluster, and
+ﬁnally detects anomalies based on it.
+r DeepLog [3]: DeepLog is a deep learning-based method
+that uses LSTM to learn log patterns from normal system
+executions and detect anomalies when deviations from the
+patterns occur.
+r LogTAD [9]: LogTAD is a state-of-the-art unsupervised
+cross-system anomaly detection framework based on
+domain-adversarial adaptation, which uses an LSTM-
+based generator to make normal log data of different sys-
+tems close to the center in a hypersphere and then uses the
+distance from the center to detect anomalies.
+Among the four baseline methods, only LogTAD is speciﬁ-
+cally designed for cross-system anomaly detection. PCA, Log-
+Cluster, and DeepLog are non-cross-system methods and do
+not incorporate cross-system adaptive mechanisms. To ensure
+fair comparisons, the non-cross-system methods (PCA, Log-
+Cluster, and DeepLog) are trained on a mixture of source
+and target system data when evaluating anomaly detection
+performance in cross-system scenarios, as described in Sec-
+tion V-A1. When evaluating anomaly detection performance in
+single-system scenarios, since only the source system dataset
+is used, the cross-system methods (LogTAD and the proposed
+LogDLR) need to remove the cross-system adaptive mechanism
+(domain-adversarial training). Speciﬁcally, for LogTAD, only
+the objective function Len[9] of the LSTM-based generator
+is optimized. For LogDLR, only the objective function LAE
+of the Transformer-based autoencoder is optimized. Notably,
+the respective anomaly detection principles of LogTAD and
+LogDLR remain unchanged after removing the cross-system
+adaptive mechanism.
+In terms of implementation, for PCA, LogCluster, and
+DeepLog, we use the open-source code available on Github.3,4
+For LogTAD, we use the code provided by the original paper
+authors on GitHub.5 For all baseline methods, we report their
+best results.
+3) Metrics: We use the Precision, Recall, and F1-score met-
+rics to evaluate the performance of LogDLR. These metrics can
+be calculated as follows:
+Precision =
+TP
+TP + FP ,
+(18)
+Recall =
+TP
+TP + FN ,
+(19)
+F1 −score = 2 × Precision × Recall
+Precision + Recall
+,
+(20)
+where TP (True Positive) is the number of abnormal log se-
+quences that the model correctly detects, FP (False Positive)
+is the number of normal log sequences that are mistakenly
+classiﬁed as anomalies and FN (False Negative) is the number
+of abnormal log sequences that the model fails to identify.
+4) Implementation Details: We implement our method using
+Python 3.9 and Pytorch 1.12 on a Linux server with an NVIDIA
+A100-PCIE-40 GB GPU. Our method’s Transformer-based au-
+toencoder has l = 4 Transformer layers in both the encoder and
+the decoder, and the number of attention heads h is 16. The di-
+mensions of the semantic vector de and the latent representation
+dz are 384 and 512, respectively. We set the hyperparameters α
+and β in the objective function to 0.1 and 1.0, respectively.
+To reduce the domain discriminator’s noise early in training
+and improve the robustness of domain-adversarial training, we
+adopt the warm-up strategy from [12], gradually increasing the
+parameter λ from 0 to 1 instead of ﬁxing it.
+We use the Adam [36] optimizer and a cosine learning rate
+schedulerwithawarm-upperiodfortraining.Theinitiallearning
+3https://github.com/logpai/loglizer
+4https://github.com/donglee-afar/logdeep
+5https://github.com/hanxiao0607/LogTAD
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4464
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+TABLE V
+EVALUATION RESULTS OF THUNDERBIRD AS SOURCE SYSTEM
+TABLE VI
+EVALUATION RESULTS OF SPIRIT AS SOURCE SYSTEM
+TABLE VII
+EVALUATION RESULTS OF BGL AS SOURCE SYSTEM
+rate is 0.0001, and the batch size is 32. These choices are based
+on best practices in training Transformer-based models and have
+been empirically validated to ensure stable convergence.
+B. Performance Evaluation
+The experiment utilizes the Thunderbird, Spirit, and BGL
+datasets to evaluate the performance of LogDLR in both single-
+system and cross-system anomaly detection. In single-system
+scenarios,onlyasinglesourcesystemdatasetisusedfortraining,
+denoted as “Source Only” in the results. In cross-system scenar-
+ios, one dataset is designated as the source system and another as
+the target system, with both datasets mixed for training. Results
+are reported using “→” to represent cross-system evaluation;
+for example, “Thunderbird →Spirit” indicates the evaluation
+results of using Thunderbird as the source system on the tar-
+get system Spirit. The experiment includes three single-system
+scenarios and six cross-system scenarios.
+Table V, Table VI, and Table VII present the compari-
+son results of LogDLR and baseline methods on the source
+and target systems. In single-system scenarios, when Thun-
+derbird, Spirit, and BGL are used as source systems, LogDLR
+achievesthehighestF1-score,withanaverageF1-scoreof0.977,
+which is 4.4% higher than LogTAD (0.933). Among the deep
+learning-based baseline methods, LogTAD’s performance is
+second only to LogDLR and superior to DeepLog. The
+traditional machine learning-based methods, PCA and LogClus-
+ter, perform worse than DeepLog and LogTAD. These results
+demonstrate that LogDLR can achieve effective unsupervised
+anomaly detection in single-system scenarios using only the
+Transformer-based autoencoder.
+In cross-system scenarios, LogDLR achieves the highest F1-
+score on the target system, with an average F1-score of 0.930,
+which is 5.1% higher than LogTAD (0.879). This indicates that
+the Transformer-based autoencoder combined with adversarial
+training effectively extracts domain-invariant latent representa-
+tions, overcoming differences in log distribution between source
+and target systems for cross-system anomaly detection. In con-
+trast, the non-cross-system baseline methods, PCA, LogCluster,
+and DeepLog, exhibit lower F1-scores on the target system com-
+pared to the cross-system methods, LogTAD and LogDLR, due
+to the absence of cross-system adaptation mechanisms, leading
+to performance degradation when encountering data distribution
+shifts across systems.
+Fig. 5 presents the evaluation results for different window
+sizes w in the Thunderbird →BGL scenario, with all other pa-
+rameters set to default. The window size refers to the number of
+consecutive log entries used for feature extraction and anomaly
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4465
+Fig. 5.
+Results of different window sizes w in the Thunderbird →BGL
+scenario. The x-axis is the window size w, and the y-axis is the precision, recall,
+and F1-score.
+Fig. 6.
+Results of different parameters α in the Thunderbird →BGL scenario.
+The x-axis is the α and the y-axis is the precision, recall, and F1-score.
+detection sequences. When w is between 10 and 30, all three
+metrics maintain high values. However, if w is too small or too
+large, the model’s precision decreases.
+Fig. 6 demonstrates the effect of the parameter α on the
+performance of LogDLR in the Thunderbird →BGL scenario,
+with all other parameters set to default. The parameter α controls
+the weight of the L2 regularization term on the latent repre-
+sentation, encouraging compact and well-regularized feature
+representations. When α = 0, the F1-score is low, indicating
+that the absence of regularization may lead to ﬁtting noisy or
+system-speciﬁc features, resulting in degraded performance. As
+α increases, the F1-score remains high and relatively stable,
+emphasizing the importance of regularization in controlling the
+latent space and improving generalization. This demonstrates
+that adding regularization to the autoencoder enhances the
+model’s ability to generalize across systems.
+Fig. 7 illustrates the effect of the parameter β on the per-
+formance of LogDLR in the BGL →Spirit scenario, where β
+controls the weight of the domain-adversarial loss, with all other
+parameters set to default. When β = 0, no domain-adversarial
+loss is applied, resulting in low precision and F1-score. When
+β is between 0.6 and 1.2, the best balance between precision,
+Fig. 7.
+Results of different parameters β in the BGL →Spirit scenario. The
+x-axis is the β, and the y-axis is the precision, recall, and F1-score.
+TABLE VIII
+PERFORMANCE OF DIFFERENT TRANSFORMER LAYERS l IN THE BGL →SPIRIT
+SCENARIO
+recall, and F1-score is achieved, indicating that a moderate
+domain-adversarial loss weight is well-suited for extracting
+domain-invariant features while maintaining anomaly detection
+performance.
+Table VIII presents the evaluation results of autoencoder
+performance with different Transformer layer numbers l in the
+BGL →Spirit scenario, including the average training time per
+batch. The number of Transformer layers (l) is a crucial factor
+affectingmodelperformance,asitdeterminesthemodel’sability
+to capture long-distance dependencies and complex patterns in
+log sequences. However, an increase in the number of layers
+also leads to a signiﬁcant rise in computational overhead, neces-
+sitating a balance between performance and computational cost.
+When l = 1, the model’s feature extraction capability is limited
+due to insufﬁcient depth, resulting in the lowest F1-score among
+all conﬁgurations. As the number of layers increases to 4, the
+model shows signiﬁcant improvements in all metrics, reaching
+an F1-score of 0.941. This indicates that a moderate increase
+in the number of layers enhances anomaly detection capabili-
+ties. When l = 6, the model achieves peak performance with
+an F1-score of 0.967, verifying that a deeper architecture can
+effectively improve the ability to capture complex log patterns.
+However, when l increases to 8, the F1-score decreases slightly,
+possibly due to overﬁtting caused by too many layers. Addition-
+ally, as the number of layers increases, the calculation time per
+batch also rises signiﬁcantly, from 11ms for l = 1 to 64ms for
+l = 8. Overall, these results indicate that the Transformer-based
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4466
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+Fig. 8.
+Impact of source system data on target system detection performance.
+autoencoder achieves the best balance of performance and com-
+putational cost with a moderate number of layers. This trade-off
+is particularly important for practical applications, especially
+in scenarios where large-scale log data needs to be processed,
+and computing overhead must be reasonably controlled to meet
+real-time and resource constraints.
+C. Ablation Studies
+r RQ1: How much does LogDLR improve the performance
+of the target system?
+We investigate the performance improvement of LogDLR
+on the target system by removing the source system data and
+evaluating LogDLR only on the target system data of Thun-
+derbird, Spirit, and BGL, as shown in Table IV. We denote
+these results as “*-T”. Fig. 8 compares LogDLR with “*-T”
+on the target system. LogDLR achieves a higher F1-score than
+“*-T” on all target systems. The biggest improvement is in
+the Thunderbird →Spirit scenario, where LogDLR reaches
+an F1-score of 0.969, 10.2% higher than “Spirit-T” (0.867).
+This indicates that LogDLR’s Transformer-based autoencoder
+effectively leverages the source system knowledge and enhances
+the detection performance on the target system by extracting
+domain-invariant latent representations of log sequences.
+Furthermore, we observe that LogDLR has different impacts
+on the same target system depending on the source system. For
+example, the F1-score in the Thunderbird →BGL scenario is
+higher than that in the Spirit →BGL scenario. This may be
+due to the variability of log semantics across different systems,
+where systems with more semantic similarity can share more
+knowledge and achieve better transfer performance. This exper-
+iment demonstrates the effectiveness of LogDLR in improving
+the anomaly detection performance of the target system.
+r RQ2: How effective is domain-adversarial training in
+cross-system detection?
+We compare the performance of LogDLR with and without
+domain-adversarial training, by removing its domain discrimi-
+nator and the GRL attached to the autoencoder. Fig. 9 shows
+the comparison results. LogDLR without domain-adversarial
+training has a lower F1-score on the target system than
+the original LogDLR. This suggests that domain-adversarial
+training helps LogDLR’s Transformer-based autoencoder to
+learn domain-invariant latent representations more effectively,
+which enhances knowledge transfer between the source and
+target systems. This experiment demonstrates the effective-
+ness of domain-adversarial training in cross-system anomaly
+detection.
+D. Visualization
+In order to demonstrate the inner workings of LogDLR, we
+visualize the latent representations and reconstruction errors of
+log sequences in three different cross-system anomaly detection
+scenarios (Thunderbird →Spirit, Spirit →BGL, and BGL →
+Thunderbird). We randomly select 1,000 normal sequences each
+from the training sets of the source and target systems, and map
+their latent representations to a two-dimensional space using the
+t-SNE [37] algorithm. Fig. 10 shows the visualization results
+of the latent representations of logs before and after training
+in the three scenarios by LogDLR. Before training, the latent
+representations of the log sequences from the source and target
+systems are scattered, but after training, they overlap more. This
+shows that LogDLR extracts domain-invariant representations,
+where the latent representations of log sequences from both the
+source and target systems become more aligned and less affected
+by system-speciﬁc characteristics. The domain-invariant repre-
+sentation obtained by LogDLR is crucial for bridging the gap
+between the source and target systems. By aligning the distri-
+butions of latent representations, LogDLR enables meaningful
+comparisons and knowledge transfer between the two systems,
+despite their initial differences.
+In addition, we randomly select 1,000 normal sequences
+and 1,000 abnormal sequences each from the test sets of the
+source and target systems, and visualize their reconstruction
+errors and corresponding detection thresholds. As shown in
+Fig. 11, the model generally has lower reconstruction errors
+for normal sequences and higher reconstruction errors for ab-
+normal sequences. This indicates that LogDLR can effectively
+distinguish between normal and abnormal log sequences based
+on their reconstruction errors. By setting appropriate detection
+thresholds, LogDLR can perform uniﬁed anomaly detection on
+the source and target systems efﬁciently.
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4467
+Fig. 9.
+Impact of domain-adversarial training on target system detection performance. “LogDLR w/o DA” refers to LogDLR without domain-adversarial training.
+Fig. 10.
+Visualization of latent representations of log sequences before and after training. (a)–(c) represent Thunderbird →Spirit, Spirit →BGL, and BGL →
+Thunderbird scenarios before training, respectively. (d)–(f) represent the same scenarios after training.
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4468
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+Fig. 11.
+Visualization of reconstruction errors of log sequences in different
+scenarios. (a), (c), and (e) represent the results on the source system (Thunder-
+bird, Spirit, and BGL) in the Thunderbird →Spirit, Spirit →BGL, and BGL →
+Thunderbird scenarios, respectively. (b), (d), and (f) represent the results on the
+target system (Spirit, BGL, and Thunderbird) in the same scenarios.
+VI. THREATS TO VALIDITY
+While this paper demonstrates the effectiveness of LogDLR
+in cross-system log anomaly detection, we acknowledge several
+threats that may affect the research results. First, the datasets
+used (Thunderbird, Spirit, BGL) are derived from public log
+datasets, which may not fully represent the log format and
+structural heterogeneity of all real systems. Therefore, we plan
+to further verify the generalization ability of LogDLR in various
+real systems in the future.
+Second, LogDLR uses normal log data for unsupervised
+training; however, in practical applications, a small number of
+unlabeled abnormal samples may be mixed into the training
+dataset. This situation may affect the model’s learning effect,
+particularly in extracting domain-invariant representations. Ab-
+normal samples may be regarded as part of normal behavior by
+the model, leading to deviations in domain-invariant represen-
+tations and ultimately affecting anomaly detection accuracy.
+Finally, although the threshold selection method proposed in
+Algorithm 1 can ensure an optimal balance between precision
+and recall, its potential limitation is the reliance on a small
+number of labeled validation datasets. The performance of the
+selected threshold is affected by the quality and representative-
+ness of the labeled validation data. To mitigate these limitations,
+future work will explore other threshold selection strategies,
+such as statistical methods based on percentiles.
+VII. RELATED WORK
+Log anomaly detection methods can be categorized into tra-
+ditional machine learning and deep learning approaches.
+Early anomaly detection relied on models like Decision
+Trees [38], SVMs [39], and PCA [34], which used log count
+vectors as inputs. Unsupervised techniques like PCA [34] and
+LogCluster [35] grouped similar log entries to identify outliers.
+However, these methods often struggle with the complexity and
+high dimensionality of log data.
+Deep learning approaches offer greater ﬂexibility in modeling
+complex patterns. CNN-based models [40], [41] effectively
+capture local dependencies, while LSTM-based methods such
+as DeepLog [3], LogTransfer [2], LogTAD [9], Pylogsenti-
+ment [42], DeepSyslog [7], and SwissLog [8] model sequential
+patterns. Despite their success, LSTMs have limitations in cap-
+turing long-range dependencies and global information of log
+sequences.
+Recent works demonstrate the superiority of Transformer-
+based models [11]. For instance, HitAnomaly [43] and
+HilBERT [44] utilize a hierarchical Transformer structure to
+model log template sequences, while LogBERT [45] adopts
+BERT to capture the patterns of normal log sequences
+through self-supervised training tasks. NeuralLog [6] employs
+a Transformer-based binary classiﬁcation model to identify
+anomalies effectively. However, NeuralLog relies on a super-
+vised learning paradigm, requiring labeled data for training. In
+contrast, LogDLR operates in an unsupervised manner, leverag-
+ing reconstruction errors and domain-invariant representations
+for anomaly detection, making it more practical in scenarios
+where labeled anomaly data is scarce or unavailable. Unlike
+NeuralLog, which focuses on single-system anomaly detec-
+tion, LogDLR integrates a Transformer-based autoencoder with
+domain-adversarial training to achieve cross-system anomaly
+detection.
+A. Unsupervised Anomaly Detection
+Unsupervised methods presume that system logs generated
+during normal operation typically exhibit stable patterns [10].
+When a failure or anomaly occurs, these patterns may be dis-
+rupted by events such as error logs, out-of-order log sequences,
+or premature termination of log sequences [46]. By learning the
+patterns of normal operation, these methods can automatically
+trigger an alarm when deviations from normal conditions are
+detected.
+Traditional machine learning-based methods identify anoma-
+lies through unsupervised data mining techniques, such as
+PCA [34] and LogCluster [35]. Another class of methods pre-
+dicts the next log template based on prior log sequences, as
+exempliﬁed by DeepLog [3]. These methods predict the next log
+template within the input window and compare it with the actual
+template. If the actual template is not among the top k most likely
+templates predicted by the model, it is classiﬁed as abnormal.
+However, DeepLog heavily relies on the completeness of the
+sequence, resulting in degraded performance when log data is
+missing or nonlinear patterns are present [47].
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4469
+TABLE IX
+COMPARISON OF CROSS-SYSTEM LOG ANOMALY DETECTION METHODS
+A different category of methods is based on support vector
+data description (SVDD) [48], such as LogTAD [9]. The fun-
+damental idea is to construct a hypersphere with the smallest
+possible radius to enclose most normal data points, with data
+points outside the hypersphere classiﬁed as abnormal.
+Another approach involves using autoencoders to learn rep-
+resentations of normal log sequences, such as AutoLog [49].
+A trained autoencoder accurately encodes normal log patterns,
+while abnormal instances produce signiﬁcantly higher recon-
+struction errors [31], [50], [51]. These reconstruction errors
+serve as a critical metric for identifying anomalies. However,
+AutoLog [49] employs an MLP-based autoencoder, which is
+limited in capturing temporal and semantic features, particularly
+in heterogeneous log data. LogDLR overcomes these limitations
+by utilizing a Transformer-based autoencoder.
+B. Cross-System Anomaly Detection
+Cross-system anomaly detection reduces the need to develop
+separate models for different systems, signiﬁcantly lowering
+maintenance costs [2].
+LogTransfer [2] is theﬁrst methodtoproposetransfer learning
+for transferring learned anomaly patterns from a source system
+to a target system using a shared fully connected network.
+However, it requires labeled data for both systems, limiting its
+applicability in real-world scenarios. To tackle this, LogTAD [9]
+introduces an unsupervised framework using an LSTM-based
+generator to align the distributions of normal log data from
+different systems via domain-adversarial adaptation. Anoma-
+lies are identiﬁed as points deviating from a hypersphere’s
+center.
+However, both LogTransfer and LogTAD utilize GloVe [14]
+and Word2Vec [15] for log semantics extraction, which are less
+effective than pre-trained models and sentence embeddings [7],
+[52], [53]. Both methods rely on LSTM-based anomaly detec-
+tion models, but LSTM has been shown to be less effective
+than Transformer in capturing long-distance dependencies and
+complex log semantics. This limitation hinders their ability to
+adapt to diverse log distributions [6]. Table IX provides a de-
+tailed comparison of LogDLR with LogTransfer and LogTAD.
+LogDLR employs a Transformer-based autoencoder combined
+with domain-adversarial training to learn domain-invariant la-
+tent representations of normal log patterns, facilitating unsuper-
+vised cross-system anomaly detection. Additionally, LogDLR
+leverages pre-trained sentence embeddings (SBERT) to seman-
+tically represent heterogeneous log data more effectively than
+traditional word embedding methods used by LogTransfer and
+LogTAD. These features enable LogDLR to achieve a higher
+F1-score compared to LogTAD in unsupervised cross-system
+anomaly detection scenarios.
+VIII. CONCLUSION
+In this work, we propose a novel unsupervised cross-system
+log anomaly detection approach, which we call LogDLR.
+LogDLR aims to extract domain-invariant latent representations
+from log sequences of different systems, which capture the
+essential features of the log sequences while ignoring the format
+and syntax differences. We treat logs as natural language text and
+use a universal sentence embedding model to extract semantic
+vectors from log entries, enabling LogDLR to handle heteroge-
+neous logs effectively. To obtain the domain-invariant latent rep-
+resentations of log sequences, we combine a Transformer-based
+autoencoder with domain-adversarial training. After learning
+domain-invariant representations of normal log sequences, we
+can perform uniﬁed anomaly detection on both source and
+target systems. Comprehensive evaluations on three public log
+datasets from different systems show that LogDLR outperforms
+the state-of-the-art method for unsupervised cross-system log
+anomaly detection.
+REFERENCES
+[1] J. Zhu, P. He, Q. Fu, H. Zhang, M. R. Lyu, and D. Zhang, “Learning to
+log: Helping developers make informed logging decisions,” in Proc. 37th
+IEEE Int. Conf. Softw. Eng., 2015, pp. 415–425.
+[2] R. Chen et al., “LogTransfer: Cross-system log anomaly detection for
+software systems with transfer learning,” in Proc. 31st IEEE Int. Symp.
+Softw. Rel. Eng., 2020, pp. 37–47.
+[3] M. Du, F. Li, G. Zheng, and V. Srikumar, “DeepLog: Anomaly detection
+and diagnosis from system logs through deep learning,” in Proc. ACM
+SIGSAC Conf. Comput. Commun. Secur., 2017, pp. 1285–1298.
+[4] W. Meng et al., “LogAnomaly: Unsupervised detection of sequential and
+quantitative anomalies in unstructured logs,” in Proc. 28th Int. Joint Conf.
+Artif. Intell., 2019, pp. 4739–4745.
+[5] X. Zhang et al., “Robust log-based anomaly detection on unstable log
+data,” in Proc. 27th ACM Joint Meeting Eur. Softw. Eng. Conf. Symp.
+Foundations Softw. Eng., 2019, pp. 807–817.
+[6] V.-H. Le and H. Zhang, “Log-based anomaly detection without log pars-
+ing,” in Proc. 36th IEEE/ACM Int. Conf. Automated Softw. Eng., 2021,
+pp. 492–504.
+[7] J. Zhou, Y. Qian, Q. Zou, P. Liu, and J. Xiang, “DeepSyslog: Deep anomaly
+detection on syslog using sentence embedding and metadata,” IEEE Trans.
+Inf. Forensics Secur., vol. 17, pp. 3051–3061, 2022.
+[8] X. Li, P. Chen, L. Jing, Z. He, and G. Yu, “SwissLog: Robust anomaly
+detection and localization for interleaved unstructured logs,” IEEE Trans.
+Dependable Secure Comput., vol. 20, pp. 2762–2780, 2023.
+[9] X. Han and S. Yuan, “Unsupervised cross-system log anomaly detection
+via domain adaptation,” in Proc. 30th ACM Int. Conf. Inf. Knowl. Manage.,
+2021, pp. 3068–3072.
+[10] V.-H. Le and H. Zhang, “Log-based anomaly detection with deep learn-
+ing: How far are we?,” in Proc. 44th Int. Conf. Softw. Eng., 2022,
+pp. 1356–1367.
+[11] A. Vaswani et al., “Attention is all you need,” in Proc. Adv. Neural Inf.
+Process. Syst., 2017, pp. 1–11.
+[12] Y. Ganin and V. Lempitsky, “Unsupervised domain adaptation by
+backpropagation,” in Proc. 32nd Int. Conf. Mach. Learn., 2015,
+pp. 1180–1189.
+[13] S. Hochreiter and J. Schmidhuber, “Long short-term memory,” Neural
+Computation, vol. 9, no. 8, pp. 1735–1780, 1997.
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+4470
+IEEE TRANSACTIONS ON DEPENDABLE AND SECURE COMPUTING, VOL. 22, NO. 4, JULY/AUGUST 2025
+[14] J. Pennington, R. Socher, and C. Manning, “GloVe: Global vectors for
+word representation,” in Proc. Conf. Empirical Methods Natural Lang.
+Process., 2014, pp. 1532–1543.
+[15] T. Mikolov, I. Sutskever, K. Chen, G. S. Corrado, and J. Dean, “Distributed
+representations of words and phrases and their compositionality,” in Proc.
+Adv. Neural Inf. Process. Syst., 2013, pp. 1–9.
+[16] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, “BERT: Pre-
+training of deep bidirectional transformers for language understanding,”
+in Proc. Conf. North Amer. Chapter Assoc. Computat. Linguistics, 2019,
+pp. 4171–4186.
+[17] N. Reimers and I. Gurevych, “Sentence-BERT: Sentence embeddings
+using siamese BERT-networks,” in Proc. Conf. Empirical Methods Natural
+Lang. Process., 2019, pp. 3982–3992.
+[18] E. Tzeng, J. Hoffman, K. Saenko, and T. Darrell, “Adversarial discrim-
+inative domain adaptation,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2017, pp. 7167–7176.
+[19] Y. Ganin et al., “Domain-adversarial training of neural networks,” J. Mach.
+Learn. Res., vol. 17, pp. 1–35, 2016.
+[20] Y. Zhang, T. Liu, M. Long, and M. Jordan, “Bridging theory and algorithm
+for domain adaptation,” in Proc. 36th Int. Conf. Mach. Learn., 2019,
+pp. 7404–7413.
+[21] J. Na, H. Jung, H. J. Chang, and W. Hwang, “FixBi: Bridging domain
+spaces for unsupervised domain adaptation,” in Proc. IEEE Conf. Comput.
+Vis. Pattern Recognit., 2021, pp. 1094–1103.
+[22] P. He, J. Zhu, Z. Zheng, and M. R. Lyu, “Drain: An online log parsing
+approach with ﬁxed depth tree,” in Proc. IEEE Int. Conf. Web Serv., 2017,
+pp. 33–40.
+[23] M. Du and F. Li, “Spell: Streaming parsing of system event logs,” in Proc.
+16th IEEE Int. Conf. Data Mining, 2016, pp. 859–864.
+[24] J. Zhu et al., “Tools and benchmarks for automated log parsing,” in Proc.
+41st Int. Conf. Softw. Eng., 2019, pp. 121–130.
+[25] A. Vervaet, “MoniLog: An automated log-based anomaly detection system
+for cloud computing infrastructures,” in Proc. 37th Int. Conf. Data Eng.,
+2021, pp. 2739–2743.
+[26] P. He, J. Zhu, S. He, J. Li, and M. R. Lyu, “Towards automated log
+parsing for large-scale log data analysis,” IEEE Trans. Dependable Secure
+Comput., vol. 15, pp. 931–944, 2018.
+[27] T. Zhang, H. Qiu, G. Castellano, M. Rifai, C. S. Chen, and F. Pianese,
+“System log parsing: A survey,” IEEE Trans. Knowl. Data Eng., vol. 35,
+pp. 8596–8614, 2023.
+[28] P. Ghosh, M. S. M. Sajjadi, A. Vergari, M. Black, and B. Scholkopf,
+“Fromvariationaltodeterministicautoencoders,”in Proc.Int.Conf.Learn.
+Representations, 2020, pp. 1–25.
+[29] A. L. Maas, A. Y. Hannun, and A. Y. Ng, “Rectiﬁer nonlinearities improve
+neural network acoustic models,” in Proc. 30th Int. Conf. Mach. Learn.,
+2013, pp. 1–6.
+[30] S. Ben-David, J. Blitzer, K. Crammer, A. Kulesza, F. Pereira, and J. W.
+Vaughan, “A theory of learning from different domains,” Mach. Learn.,
+vol. 79, pp. 151–175, 2010.
+[31] A. Borghesi, A. Bartolini, M. Lombardi, M. Milano, and L. Benini,
+“Anomaly detection using autoencoders in high performance comput-
+ing systems,” in Proc. 31st Innov. Appl. Artif. Intell. Conf., 2019,
+pp. 9428–9433.
+[32] J. Zhu, S. He, P. He, J. Liu, and M. R. Lyu, “Loghub: A large collection of
+system log datasets for ai-driven log analytics,” in Proc. 34th Int. Symp.
+Softw. Rel. Eng., 2023, pp. 355–366.
+[33] A. Oliner and J. Stearley, “What supercomputers say: A study of ﬁve
+system logs,” in Proc. 37th Annu. IEEE/IFIP Int. Conf. Dependable Syst.
+Netw., 2007, pp. 575–584.
+[34] W. Xu, L. Huang, A. Fox, D. Patterson, and M. I. Jordan, “De-
+tecting large-scale system problems by mining console logs,” in
+Proc. ACM SIGOPS 22nd Symp. Operating Syst. Princ., 2009,
+pp. 117–132.
+[35] Q. Lin, H. Zhang, J.-G. Lou, Y. Zhang, and X. Chen, “Log clustering based
+problem identiﬁcation for online service systems,” in Proc. 38th Int. Conf.
+Softw. Eng. Companion, 2016, pp. 102–111.
+[36] D. P. Kingma and J. Ba, “Adam: A method for stochastic optimization,”
+in Proc. Int. Conf. Learn. Representations, 2015, pp. 1–15.
+[37] L. van der Maaten and G. Hinton, “Visualizing data using t-SNE,” J. Mach.
+Learn. Res., vol. 9, pp. 2579–2605, 2008.
+[38] M. Chen, A. Zheng, J. Lloyd, M. Jordan, and E. Brewer, “Failure diag-
+nosis using decision trees,” in Proc. Int. Conf. Autonomic Comput., 2004,
+pp. 36–43.
+[39] Y. Liang, Y. Zhang, H. Xiong, and R. Sahoo, “Failure prediction in IBM
+BlueGene/L event logs,” in Proc. 7th IEEE Int. Conf. Data Mining, 2007,
+pp. 583–588.
+[40] S. Lu, X. Wei, Y. Li, and L. Wang, “Detecting anomaly in Big Data
+system logs using convolutional neural network,” in Proc. 16th Int. Conf.
+Dependable Autonomic Secure Comput, 2018, pp. 151–158.
+[41] B. Li, S. Ma, R. Deng, K.-K. R. Choo, and J. Yang, “Federated anomaly
+detection on system logs for the Internet of Things: A customizable and
+communication-efﬁcient approach,” IEEE Trans. Netw. Service Manage.,
+vol. 19, no. 2, pp. 1705–1716, Jun. 2022.
+[42] H. Studiawan, F. Sohel, and C. Payne, “Anomaly detection in operating
+systemlogswithdeeplearning-basedsentimentanalysis,”IEEETrans.De-
+pendable Secure Comput., vol. 18, no. 5, pp. 2136–2148, Sep./Oct. 2021.
+[43] S. Huang et al., “HitAnomaly: Hierarchical transformers for anomaly
+detection in system log,” IEEE Trans. Netw. Service Manage., vol. 17,
+no. 4, pp. 2064–2076, Dec. 2020.
+[44] S. Huang, Y. Liu, C. Fung, H. Wang, H. Yang, and Z. Luan, “Improving
+log-based anomaly detection by pre-training hierarchical transformers,”
+IEEE Trans. Comput., vol. 72, no. 9, pp. 2656–2667, Sep. 2023.
+[45] H. Guo, S. Yuan, and X. Wu, “LogBERT: Log anomaly detection via
+BERT,” in Proc. Int. Joint Conf. Neural Netw., 2021, pp. 1–8.
+[46] Z. Chen, J. Liu, W. Gu, Y. Su, and M. R. Lyu, ”Experience re-
+port: Deep learning-based system log analysis for anomaly detection,”
+2021, arXiv:2107.05908.
+[47] J. Li, H. He, S. Chen, D. Jin, and J. Yang, “LogGraph: Log event graph
+learning aided robust ﬁne-grained anomaly diagnosis,” IEEE Trans. De-
+pendable Secure Comput., vol. 21, no. 4, pp. 1876–1889, Jul./Aug. 2024.
+[48] L. Ruff et al., “Deep one-class classiﬁcation,” in Proc. 35th Int. Conf.
+Mach. Learn., 2018, pp. 4393–4402.
+[49] M. Catillo, A. Pecchia, and U. Villano, “AutoLog: Anomaly detection by
+deep autoencoding of system logs,” Expert Syst. Appl., vol. 191, pp. 1–21,
+2022.
+[50] J. An and S. Cho, “Variational autoencoder based anomaly detection using
+reconstruction probability,” Special Lecture IE, vol. 2, no. 1, pp. 1–18,
+2015.
+[51] D. Gong et al., “Memorizing normality to detect anomaly: Memory-
+augmented deep autoencoder for unsupervised anomaly detection,” in
+Proc. IEEE/CVF Int. Conf. Comput. Vis., 2019, pp. 1705–1714.
+[52] W. Wang, S. Lu, J. Luo, and C. Wu, “DeepUserLog: Deep anomaly
+detection on user log using semantic analysis and key-value data,” in Proc.
+IEEE 34th Int. Symp. Softw. Rel. Eng., 2023, pp. 172–182.
+[53] X. Xie, S. Jian, C. Huang, F. Yu, and Y. Deng, “LogRep: Log-based
+anomaly detection by representing both semantic and numeric information
+in raw messages,” in Proc. IEEE 34th Int. Symp. Softw. Rel. Eng., 2023,
+pp. 194–206.
+Junwei Zhou (Member, IEEE) received the PhD
+degree from the Department of Electrical Engineer-
+ing, City University of Hong Kong. Since then, he
+has been a postdoctoral researcher with Pennsylva-
+nia State University, USA, a visiting scholar with
+the Polytechnic University of Turin, Italy, and a re-
+searcher with the City University of Hong Kong,
+Hong Kong, China. He is a professor with the School
+of Computer and Artiﬁcial Intelligence, Wuhan Uni-
+versity of Technology, China. His research interests
+include computer vision, information security, and
+distributed source coding. He has served as a PC Member for top confer-
+ences, such as EMNLP 2023-2024, Coling 2022, ACL 2022-2024, and ISSRE
+2022-2024.
+Shaowen Ying received the BS degree in vehicle
+engineering from the Wuhan University of Technol-
+ogy, where he is currently working toward the MS
+degree in computer science and technology. His cur-
+rent research interests include log analysis, system
+reliability, and software engineering.
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+
+ZHOU et al.: LOGDLR: UNSUPERVISED CROSS-SYSTEM LOG ANOMALY DETECTION THROUGH DOMAIN-INVARIANT LATENT REPRESENTATION
+4471
+Shulan Wang received the PhD degree in informa-
+tion and communication engineering from Shenzhen
+University, Shenzhen, China, in 2016. She is an as-
+sociate professor of Internet of Things Engineering
+with the College of Big Data and Internet, Shenzhen
+Technology University, Shenzhen. Her research inter-
+ests include cryptography, cloud computing, and data
+security.
+Dongdong Zhao received the PhD degree from
+the University of Science and Technology of China
+(USTC), in 2016. He is currently an associate pro-
+fessor with the School of Computer Science and
+Artiﬁcial Intelligence, Wuhan University of Technol-
+ogy. His research interests include dependable com-
+puting, information security, privacy protection and
+biometrics.
+Jianwen Xiang (Member, IEEE) received the PhD
+degree in computer software and theory from Wuhan
+University and in information science from the Japan
+Advanced Institute of Science and Technology. Since
+then, he has been a special research fellow with the
+National Institute of Advanced Industrial Science
+and Technology, Japan, the Director of the Central
+Research Laboratory, NEC Corporation, Japan, and
+a Postdoctoral Researcher with the Japan Advanced
+Institute of Science and Technology. He is currently
+a professor with the School of Computer Science and
+Technology, Wuhan University of Technology, China, and a visiting professor
+with Kyushu University, Japan. His research interests include dependable com-
+puting, information security, formal methods, and knowledge management. He
+has served as a Reviewer for international journals, including IEEE Transactions
+On Reliability, Reliability Engineering and System Safety, ACM Transactions
+on Software Engineering and Methodology, Journal of Systems and Software,
+and IEICE Transactions.
+Kaitai Liang (Member, IEEE) received the PhD de-
+gree in computer science from the Department of
+Computer Science, City University of Hong Kong.
+He worked as a postdoctoral researcher with Aalto
+University and held a permanent assistant professor
+position in secure systems with the University of Sur-
+rey. With over 11 years experiences on cybersecurity
+R&D, his main focus is on the design and implemen-
+tation of cryptographic protocols to security. He has
+led as a PI in several European funded projects, e.g.,
+TANGO, ASSURED, IRIS, and delivered real-world
+impact via these projects with academic and industrial partners (e.g., IBM,
+Fujitsu, NEC, EIT Manufacturing, BIBA, ATOS, UBITECH). He has also
+maintained a tight research relationship with Europe, Asia-paciﬁc and northern
+America academic communities. He has published a series of research works (>
+140 publications, > 4,500 citations), applying information security and crypto
+tools to address cybersecurity challenges. These publications have appeared in
+high-tier international information security journals and A* conferences, e.g.,
+USENIX Security, NDSS, ESORICS (where he was honored with the Best
+Research Paper Award in 2015), IEEE Transactions on Information Foren-
+sics and Security, IEEE Transactions on Dependable and Secure Computing,
+IEEE IoT.
+Peng Liu (Member, IEEE) received the BS and MS
+degrees from the University of Science and Technol-
+ogyofChina,andthePhDdegreefromGeorgeMason
+University, in 1999. He is the Raymond G. Tronzo,
+M.D. professor of cybersecurity, the Founding Di-
+rector of the Center for CyberSecurity, Information
+Privacy, and Trust, and the Founding Director of
+the Cyber Security Laboratory, Penn State Univer-
+sity. He has co-led the effort to make Penn State
+the NSA-Certiﬁed National Center of Excellence in
+Information Assurance Education and Research. He
+has advised or co-advised more than 35 Ph.D. dissertations to completion. He has
+published numerous papers on top conferences and journals. His research has
+been sponsored by NSF, ARO, AFOSR, DARPA, DHS, DOE, AFRL, NSA,
+TTC, CISCO, and HP. His research interests include all areas of computer
+security. He was a recipient of the DOE Early Career Principle Investigator
+Award. He has served as the Program (Co-)Chair or the General (Co-)Chair for
+over ten international conferences (e.g., Asia CCS 2010) and workshops (e.g.,
+MTD 2016). He will serve as the PC Co-Chair for IEEE/IFIP DSN 2022. He
+has chaired the Steering Committee of SECURECOMM from 2008 to 2014. He
+has served on over 100 program committees and reviewed papers for numerous
+journals.HeistheEditor-in-ChiefoftheJournalofComputerSecurity.Hewasan
+associate editor for IEEE Transactions on Dependable And Secure Computing.
+Authorized licensed use limited to: Indian Institute of Technology Patna. Downloaded on August 05,2026 at 10:00:36 UTC from IEEE Xplore.  Restrictions apply. 
+

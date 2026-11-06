@@ -110,10 +110,16 @@ print(f"Prototype: {USE_PROTOTYPE}, Cosine+Huber: {USE_COSINE_HUBER}, Conformal:
 # =============================================================================
 import subprocess, sys
 
-try:
-    import bitsandbytes, accelerate, sentencepiece
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "bitsandbytes", "accelerate", "sentencepiece"])
+_MISSING_DEPS = ["bitsandbytes", "accelerate", "sentencepiece", "lightning", "sentence-transformers", "gensim"]
+_install_cmd = [sys.executable, "-m", "pip", "install", "-q"] + _MISSING_DEPS
+
+for pkg in _MISSING_DEPS:
+    try:
+        __import__(pkg.replace("-", "_"))  # package names use underscores
+    except ImportError:
+        print(f"Installing missing dependency: {pkg} ...")
+        subprocess.check_call(_install_cmd)
+        break  # one install call covers all
 
 sys.path.append(PROJECT_ROOT)
 

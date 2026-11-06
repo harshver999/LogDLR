@@ -161,81 +161,21 @@ else:
 print("Device:", device, "CUDA:", torch.cuda.is_available())
 
 # =============================================================================
-# Auto-download datasets from Zenodo (LogHub)
-# =============================================================================
-_KNOWN_DATASET_URLS = {
-    "Thunderbird": "https://zenodo.org/record/8196385/files/Thunderbird.tar.gz?download=1",
-    "BGL":          "https://zenodo.org/record/8196385/files/BGL.tar.gz?download=1",
-    "Spirit":       "https://zenodo.org/record/5176176/files/Spirit1G.log.tar.gz?download=1",
-}
-
-
-def download_and_extract_dataset(name: str, dest_dir: str):
-    """Download a dataset archive from Zenodo/LogHub if its .log file is missing.
-    Streams the download directly into tar to avoid storing the archive on disk."""
-    log_path = os.path.join(dest_dir, name, f"{name}.log")
-    if os.path.exists(log_path):
-        print(f"  [Dataset] {name}: found {log_path}")
-        return
-
-    url = _KNOWN_DATASET_URLS.get(name)
-    if url is None:
-        raise ValueError(f"No known download URL for dataset: {name}")
-
-    os.makedirs(dest_dir, exist_ok=True)
-
-    print(f"  [Dataset] {name}: downloading & extracting from Zenodo (streaming)...")
-    # Pipe wget/curl directly into tar so the .tar.gz file is never stored on disk.
-    # This prevents disk-full errors on Kaggle.
-    import shlex
-    quoted_url = shlex.quote(url)
-    quoted_dest = shlex.quote(dest_dir)
-    try:
-        subprocess.run(
-            f"wget -q -O - {quoted_url} | tar -xzf - -C {quoted_dest} --strip-components=0",
-            shell=True, check=True, executable="/bin/bash", timeout=3600
-        )
-    except Exception:
-        print(f"  wget pipe failed, trying curl pipe...")
-        subprocess.run(
-            f"curl -L -s {quoted_url} | tar -xzf - -C {quoted_dest} --strip-components=0",
-            shell=True, check=True, executable="/bin/bash", timeout=3600
-        )
-
-    # Some archives place the .log in a sub-folder or with a slightly different name.
-    if not os.path.exists(log_path):
-        import glob as _glob
-        # Try expected sub-folder first
-        candidates = _glob.glob(os.path.join(dest_dir, name, "**", "*.log"), recursive=True)
-        if not candidates:
-            # Fallback: any .log anywhere under dest_dir
-            candidates = _glob.glob(os.path.join(dest_dir, "**", "*.log"), recursive=True)
-        if candidates:
-            found = candidates[0]
-            expected_dir = os.path.dirname(log_path)
-            if os.path.dirname(found) != expected_dir:
-                os.makedirs(expected_dir, exist_ok=True)
-            if found != log_path:
-                os.rename(found, log_path)
-            # Clean up empty directories left behind
-            found_dir = os.path.dirname(found)
-            if found_dir != expected_dir and os.path.isdir(found_dir) and not os.listdir(found_dir):
-                os.rmdir(found_dir)
-            print(f"  [Dataset] {name}: resolved log -> {log_path}")
-        else:
-            raise FileNotFoundError(f"Extraction complete but no .log file found for {name} in {dest_dir}.")
-
-    print(f"  [Dataset] {name}: ready.")
-
-
-# =============================================================================
-# STEP 1 — Download / verify datasets
+# STEP 1 — Verify datasets exist (NO auto-download; upload data as Kaggle Dataset)
 # =============================================================================
 print("Checking datasets...")
-download_and_extract_dataset(SOURCE, DATA_ROOT)
-download_and_extract_dataset(TARGET, DATA_ROOT)
-assert os.path.exists(LOG_FILE_S), f"Source log not found: {LOG_FILE_S}"
-assert os.path.exists(LOG_FILE_T), f"Target log not found: {LOG_FILE_T}"
+if not os.path.exists(LOG_FILE_S):
+    raise FileNotFoundError(
+        f"Source log not found: {LOG_FILE_S}\n"
+        f"Please upload the datasets as a Kaggle Dataset and set DATA_ROOT.\n"
+        f"Expected structure: <DATA_ROOT>/{SOURCE}/{SOURCE}.log"
+    )
+if not os.path.exists(LOG_FILE_T):
+    raise FileNotFoundError(
+        f"Target log not found: {LOG_FILE_T}\n"
+        f"Please upload the datasets as a Kaggle Dataset and set DATA_ROOT.\n"
+        f"Expected structure: <DATA_ROOT>/{TARGET}/{TARGET}.log"
+    )
 print("Datasets verified.")
 
 # %% [code]

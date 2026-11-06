@@ -29,12 +29,16 @@ MAX_EPOCHS     = int(os.environ.get("MAX_EPOCHS", "50"))
 LOGLM_MODEL_NAME = os.environ.get("LOGLM_MODEL_NAME", "meta-llama/Llama-2-7b-hf")
 USE_8BIT       = os.environ.get("USE_8BIT", "1") == "1"
 
-# Paths: code is git-cloned into /kaggle/working; data lands here (auto-downloaded).
-PROJECT_ROOT = "/kaggle/working/LogLDR-pp"
-# Allow pointing DATA_ROOT to a mounted Kaggle Dataset via env var.
-DEFAULT_DATA_ROOT = os.path.join(PROJECT_ROOT, "LogDLR", "dataset")
-DATA_ROOT    = os.environ.get("DATA_ROOT", DEFAULT_DATA_ROOT)
+# Paths: derive PROJECT_ROOT from where this script lives (repo root).
+# If you ran: !git clone ... /kaggle/working/LogDLR
+# then __file__ == /kaggle/working/LogDLR/kaggle_e1_e5.py
+_PROJECT_ROOT_FROM_FILE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT", _PROJECT_ROOT_FROM_FILE)
+
+# Data directory is independent of the repo name to avoid path confusion.
+# It lives directly in /kaggle/working so it is persisted as output.
 WORKING_DIR  = "/kaggle/working"
+DATA_ROOT    = os.environ.get("DATA_ROOT", os.path.join(WORKING_DIR, "datasets"))
 
 # Dataset log paths
 LOG_FILE_S = os.path.join(DATA_ROOT, SOURCE, f"{SOURCE}.log")
@@ -167,7 +171,8 @@ _KNOWN_DATASET_URLS = {
 
 
 def download_and_extract_dataset(name: str, dest_dir: str):
-    """Download a dataset archive from Zenodo/LogHub if its .log file is missing."""
+    """Download a dataset archive from Zenodo/LogHub if its .log file is missing.
+    Streams the download directly into tar to avoid storing the archive on disk."""
     log_path = os.path.join(dest_dir, name, f"{name}.log")
     if os.path.exists(log_path):
         print(f"  [Dataset] {name}: found {log_path}")
@@ -178,34 +183,47 @@ def download_and_extract_dataset(name: str, dest_dir: str):
         raise ValueError(f"No known download URL for dataset: {name}")
 
     os.makedirs(dest_dir, exist_ok=True)
-    archive = os.path.join(dest_dir, f"{name}.tar.gz")
 
-    print(f"  [Dataset] {name}: downloading from Zenodo...")
+    print(f"  [Dataset] {name}: downloading & extracting from Zenodo (streaming)...")
+    # Pipe wget/curl directly into tar so the .tar.gz file is never stored on disk.
+    # This prevents disk-full errors on Kaggle.
+    import shlex
+    quoted_url = shlex.quote(url)
+    quoted_dest = shlex.quote(dest_dir)
     try:
-        subprocess.run(["wget", "-c", "-q", "-O", archive, url], check=True)
+        subprocess.run(
+            f"wget -q -O - {quoted_url} | tar -xzf - -C {quoted_dest} --strip-components=0",
+            shell=True, check=True, executable="/bin/bash", timeout=3600
+        )
     except Exception:
-        print(f"  wget failed, trying curl...")
-        subprocess.run(["curl", "-L", "-C", "-", "-o", archive, url], check=True)
+        print(f"  wget pipe failed, trying curl pipe...")
+        subprocess.run(
+            f"curl -L -s {quoted_url} | tar -xzf - -C {quoted_dest} --strip-components=0",
+            shell=True, check=True, executable="/bin/bash", timeout=3600
+        )
 
-    print(f"  [Dataset] {name}: extracting {archive} ...")
-    subprocess.run(["tar", "-xzf", archive, "-C", dest_dir, "--strip-components=0"], check=False)
-
-    # Remove archive to save disk space
-    if os.path.exists(archive):
-        os.remove(archive)
-
-    # Some archives place the .log in a sub-folder; locate it.
+    # Some archives place the .log in a sub-folder or with a slightly different name.
     if not os.path.exists(log_path):
         import glob as _glob
+        # Try expected sub-folder first
         candidates = _glob.glob(os.path.join(dest_dir, name, "**", "*.log"), recursive=True)
+        if not candidates:
+            # Fallback: any .log anywhere under dest_dir
+            candidates = _glob.glob(os.path.join(dest_dir, "**", "*.log"), recursive=True)
         if candidates:
             found = candidates[0]
-            if os.path.dirname(found) != os.path.dirname(log_path):
-                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            expected_dir = os.path.dirname(log_path)
+            if os.path.dirname(found) != expected_dir:
+                os.makedirs(expected_dir, exist_ok=True)
+            if found != log_path:
                 os.rename(found, log_path)
+            # Clean up empty directories left behind
+            found_dir = os.path.dirname(found)
+            if found_dir != expected_dir and os.path.isdir(found_dir) and not os.listdir(found_dir):
+                os.rmdir(found_dir)
             print(f"  [Dataset] {name}: resolved log -> {log_path}")
         else:
-            raise FileNotFoundError(f"Extraction complete but {log_path} not found.")
+            raise FileNotFoundError(f"Extraction complete but no .log file found for {name} in {dest_dir}.")
 
     print(f"  [Dataset] {name}: ready.")
 

@@ -19,9 +19,11 @@
 import os
 
 # Experiment identifier: "E1", "E2", "E3", "E4", "E5"
+# Default to the smallest pair (BGL <-> Spirit) to maximize chance of finishing
+# within the 12-hour Kaggle limit.Override via env vars if needed.
 EXPERIMENT = os.environ.get("EXPERIMENT", "E1")
-SOURCE     = os.environ.get("SOURCE", "Thunderbird")
-TARGET     = os.environ.get("TARGET", "BGL")
+SOURCE     = os.environ.get("SOURCE", "BGL")
+TARGET     = os.environ.get("TARGET", "Spirit")
 
 # Override these via notebook env vars if you don't want to edit the file.
 NROWS          = int(os.environ.get("NROWS", "10000000"))      # Reduce to 1_000_000 for pilot

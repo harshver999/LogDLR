@@ -678,6 +678,10 @@ class LogDLRpp(LightningModule):
             preds = [0 if s <= self.th else 1 for s in self.recon_losses]
             p, r, f1, _ = metrics.precision_recall_fscore_support(self.labels, preds, average="binary")
             print(f"Threshold  Precision: {p:.3f}, Recall: {r:.3f}, F1: {f1:.3f}")
+        # Store so the driver script can write them to JSON
+        self.test_precision = float(p)
+        self.test_recall    = float(r)
+        self.test_f1        = float(f1)
 
     def _threshold(self, n=100):
         mean_N = np.mean([s for s, y in zip(self.recon_losses, self.labels) if y == 0])
@@ -933,6 +937,9 @@ def main():
         "target": TARGET,
         "seed": RANDOM_SEED,
         "best_checkpoint": best_path,
+        "precision": getattr(model, "test_precision", None),
+        "recall": getattr(model, "test_recall", None),
+        "f1": getattr(model, "test_f1", None),
         "config": {
             "experiment": EXPERIMENT,
             "use_structure_preprocess": USE_STRUCTURE_PREPROCESS,

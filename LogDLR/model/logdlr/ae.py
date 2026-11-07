@@ -1,14 +1,14 @@
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-import lightning as L
+from lightning.pytorch import LightningModule
 import numpy as np
 from sklearn import metrics
 from ..modules.transformer import TransformerEncoder, TransformerDecoder
 from transformers.optimization import get_cosine_schedule_with_warmup
 
 
-class AE(L.LightningModule):
+class AE(LightningModule):
 
     def __init__(self, **kwargs):
         super().__init__()

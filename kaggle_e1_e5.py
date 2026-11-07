@@ -129,6 +129,11 @@ for pkg in _MISSING_DEPS:
 
 sys.path.append(PROJECT_ROOT)
 
+# Explicit Lightning imports (guaranteed namespace in v2.x)
+from lightning.pytorch import Trainer, seed_everything, LightningModule
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, Callback
+from lightning.pytorch.loggers import CSVLogger
+
 import re
 import time
 import json
@@ -539,7 +544,7 @@ class ConformalCalibrator:
 # STEP 6 — Lightning Model (LogDLR++)
 # =============================================================================
 
-class LogDLRpp(L.LightningModule):
+class LogDLRpp(LightningModule):
     def __init__(self, num_training_steps, embed_dim=384, latent_dim=512, nhead=16,
                  num_layers=4, window_size=20, lr=1e-4, weight_decay=0.0,
                  alpha=0.1, beta=1.0, num_warmup_steps=4000,
@@ -695,7 +700,7 @@ class LogDLRpp(L.LightningModule):
 # STEP 7 — Prototype update callback
 # =============================================================================
 
-class PrototypeUpdateCallback(L.Callback):
+class PrototypeUpdateCallback(Callback):
     """Re-computes K-Means prototypes from normal source training latents every N epochs."""
 
     def __init__(self, source_dm, every_n_epochs=1):
@@ -763,7 +768,7 @@ def build_conformal_calibrator(model, datamodule, n_max=10000):
 # =============================================================================
 
 def main():
-    L.seed_everything(RANDOM_SEED)
+    seed_everything(RANDOM_SEED)
 
     # ---------------------------------------------------------------
     # 9A. Extract / load LogLM embeddings (ONE TIME PER DATASET)
@@ -862,7 +867,7 @@ def main():
     # 9D. Callbacks
     # ---------------------------------------------------------------
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-    checkpoint_cb = L.callbacks.ModelCheckpoint(
+    checkpoint_cb = ModelCheckpoint(
         dirpath=CHECKPOINT_DIR,
         filename="{epoch:02d}-{val_loss:.2f}",
         save_top_k=1,
@@ -870,17 +875,17 @@ def main():
         monitor="val_loss",
         mode="min",
     )
-    early_stop_cb = L.callbacks.EarlyStopping(monitor="val_loss", patience=4, verbose=True)
+    early_stop_cb = EarlyStopping(monitor="val_loss", patience=4, verbose=True)
     proto_cb = PrototypeUpdateCallback(data_S, every_n_epochs=1) if USE_PROTOTYPE else None
 
     cbs = [checkpoint_cb, early_stop_cb]
     if proto_cb:
         cbs.append(proto_cb)
 
-    trainer = L.Trainer(
+    trainer = Trainer(
         max_epochs=MAX_EPOCHS,
         callbacks=cbs,
-        logger=L.loggers.CSVLogger(save_dir=CHECKPOINT_DIR),
+        logger=CSVLogger(save_dir=CHECKPOINT_DIR),
         enable_progress_bar=True,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,

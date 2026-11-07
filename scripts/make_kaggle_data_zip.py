@@ -11,7 +11,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 SOURCE_DIR = Path("E:/btp_oct/data/raw")
 OUTPUT_ZIP = Path("E:/btp_oct/LogLDR-pp/kaggle_upload_logdlr_data.zip")
-NROWS = 1_000_000   # lines per dataset
+NROWS = 10_000_000   # lines per dataset (full run)
 
 FILES = {
     "Thunderbird": SOURCE_DIR / "Thunderbird10M.log",

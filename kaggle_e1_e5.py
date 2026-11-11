@@ -254,25 +254,31 @@ class LogLMEncoder:
         self.model.eval()
 
     @torch.no_grad()
-    def encode(self, texts, batch_size=8):
+    def encode(self, texts):
+        """Batch-size fixed to 1 on T4 to avoid bitsandbytes multi-sample deadlock."""
         embs = []
-        for i in tqdm(range(0, len(texts), batch_size), desc="LogLM encode"):
-            batch = texts[i:i + batch_size]
+        for i, txt in enumerate(texts):
+            # Heartbeat every 100 items so the run never looks "silent" for >2 min
+            if i % 100 == 0:
+                print(f"  [encode] {i}/{len(texts)} ...")
+            # Size-1 batch: eliminates multi-sample tensor deadlock on T4
             inputs = self.tokenizer(
-                batch,
+                txt,
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
                 max_length=MAX_LENGTH,
             )
-            # device_map="auto" handles placement, but let's be safe
             inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
             outputs = self.model(**inputs, output_hidden_states=True)
-            hidden = outputs.hidden_states[-1]                     # [batch, seq, hidden]
-            mask = inputs["attention_mask"].unsqueeze(-1).float()  # [batch, seq, 1]
-            emb = (hidden * mask).sum(dim=1) / mask.sum(dim=1)     # [batch, hidden]
-            embs.append(emb.cpu())
-        return torch.cat(embs, dim=0)
+            hidden = outputs.hidden_states[-1]                     # [1, seq, hidden]
+            mask = inputs["attention_mask"].unsqueeze(-1).float()    # [1, seq, 1]
+            emb = (hidden * mask).sum(dim=1) / mask.sum(dim=1)     # [1, hidden]
+            embs.append(emb.cpu().squeeze(0))
+            # Aggressive cache clear between samples to keep GPU memory stable
+            if i % 10 == 0:
+                torch.cuda.empty_cache()
+        return torch.stack(embs, dim=0)
 
 
 def extract_and_cache_embeddings(unique_logs, dataset_name, encoder, chunk_size=2000):
@@ -295,9 +301,11 @@ def extract_and_cache_embeddings(unique_logs, dataset_name, encoder, chunk_size=
         print(f"All embeddings cached for {dataset_name}.")
         return
 
+    print(f"Embedding {len(remaining)} new logs for {dataset_name} with batch_size=1 ...")
     for i in range(0, len(remaining), chunk_size):
+        print(f"  [chunk] {i}/{len(remaining)} ...")
         chunk = remaining[i:i + chunk_size]
-        embs = encoder.encode(chunk, batch_size=4 if USE_8BIT else 8)
+        embs = encoder.encode(chunk)
 
         chunk_file = os.path.join(EMBED_CACHE_DIR, f"{dataset_name}_chunk_{len(done)}.pt")
         buffer = {}
@@ -308,7 +316,7 @@ def extract_and_cache_embeddings(unique_logs, dataset_name, encoder, chunk_size=
 
         with open(done_path, "wb") as f:
             pickle.dump(done, f)
-        print(f"Saved {chunk_file} | total done: {len(done)}")
+        print(f"  Saved {chunk_file} | total done: {len(done)}")
 
     print(f"Extraction complete for {dataset_name}.")
 

@@ -255,35 +255,47 @@ class LogLMEncoder:
 
     @torch.no_grad()
     def encode(self, texts):
-        """Batch-size fixed to 1 on T4 to avoid bitsandbytes multi-sample deadlock."""
+        """Defensive single-sample encode with forensic logging.
+        If a specific input causes a hang/crash, the last printed line
+        in the Kaggle log reveals the exact culprit text.
+        """
         embs = []
+        bad_texts = []
         for i, txt in enumerate(texts):
-            # Heartbeat every 100 items so the run never looks "silent" for >2 min
-            if i % 100 == 0:
-                print(f"  [encode] {i}/{len(texts)} ...")
-            # Size-1 batch: eliminates multi-sample tensor deadlock on T4
-            inputs = self.tokenizer(
-                txt,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=MAX_LENGTH,
-            )
-            inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
-            outputs = self.model(**inputs, output_hidden_states=True)
-            hidden = outputs.hidden_states[-1]                     # [1, seq, hidden]
-            mask = inputs["attention_mask"].unsqueeze(-1).float()    # [1, seq, 1]
-            emb = (hidden * mask).sum(dim=1) / mask.sum(dim=1)     # [1, hidden]
-            embs.append(emb.cpu().squeeze(0))
-            # Aggressive cache clear between samples to keep GPU memory stable
-            if i % 10 == 0:
-                torch.cuda.empty_cache()
+            safe_txt = repr(txt[:80])  # first 80 chars, escaped
+            print(f"  [{i}/{len(texts)}] txt={safe_txt}")
+            try:
+                inputs = self.tokenizer(
+                    txt,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=MAX_LENGTH,
+                )
+                # Guard against empty tokenization
+                if inputs["input_ids"].numel() == 0:
+                    print(f"    WARNING: empty tokenization -> zero vector")
+                    embs.append(torch.zeros(self.model.config.hidden_size))
+                    continue
+                inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+                outputs = self.model(**inputs, output_hidden_states=True)
+                hidden = outputs.hidden_states[-1]                     # [1, seq, hidden]
+                mask = inputs["attention_mask"].unsqueeze(-1).float()    # [1, seq, 1]
+                emb = (hidden * mask).sum(dim=1) / mask.sum(dim=1)     # [1, hidden]
+                embs.append(emb.cpu().squeeze(0))
+                print(f"    OK")
+            except Exception as e:
+                print(f"    ERROR ({type(e).__name__}): {e} -> zero vector")
+                bad_texts.append(txt)
+                embs.append(torch.zeros(self.model.config.hidden_size))
+        if bad_texts:
+            print(f"  WARNING: {len(bad_texts)} texts failed and were zero-vectorized.")
         return torch.stack(embs, dim=0)
 
 
-def extract_and_cache_embeddings(unique_logs, dataset_name, encoder, chunk_size=2000):
+def extract_and_cache_embeddings(unique_logs, dataset_name, encoder, chunk_size=100):
     """
-    Resume-friendly embedding extraction.
+    Resume-friendly embedding extraction (chunk_size=100 for fine-grained resume).
     Saves chunks to /kaggle/working/loglm_embeddings/ so you can download
     them and resume in a later session if the VM dies.
     """
@@ -301,7 +313,7 @@ def extract_and_cache_embeddings(unique_logs, dataset_name, encoder, chunk_size=
         print(f"All embeddings cached for {dataset_name}.")
         return
 
-    print(f"Embedding {len(remaining)} new logs for {dataset_name} with batch_size=1 ...")
+    print(f"Embedding {len(remaining)} new logs for {dataset_name} ...")
     for i in range(0, len(remaining), chunk_size):
         print(f"  [chunk] {i}/{len(remaining)} ...")
         chunk = remaining[i:i + chunk_size]
